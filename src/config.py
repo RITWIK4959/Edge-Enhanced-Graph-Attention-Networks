@@ -1,83 +1,109 @@
 import torch
 
-SEED = 42
+
+# ============================================================
+# REPRODUCIBILITY
+# ============================================================
+
+# Final paper experiments
+SEEDS = (42, 43, 44, 45, 46)
+
+# True = run all five seeds
+# False = run only the first seed
+RUN_ALL_SEEDS = True
+
+
+# ============================================================
+# DATA
+# ============================================================
 
 DATASET_ROOT = "./data"
-DATASETS = ("Cora", "CiteSeer", "PubMed")
+
+DATASETS = (
+    "Cora",
+    "CiteSeer",
+    "PubMed",
+)
+
+
+# ============================================================
+# DEVICE
+# ============================================================
 
 DEVICE = torch.device(
-    "cuda" if torch.cuda.is_available() else "cpu"
+    "cuda" if torch.cuda.is_available()
+    else "cpu"
 )
 
 CPU_NUM_THREADS = 4
 
-# ---------------------------------------------------------
-# MODEL
-# ---------------------------------------------------------
 
-# Classic GAT-style hidden representation
-HIDDEN_CHANNELS = 8
+# ============================================================
+# MODEL ARCHITECTURE
+# ============================================================
 
-# Classic GAT uses multi-head attention in the hidden layer
-NUM_HEADS = 8
+NODE_DIM = 64
+HIDDEN_CHANNELS = 64
 
-# Number of GNN layers
+NUM_HEADS = 4
 NUM_LAYERS = 2
 
-# Edge feature size
-EDGE_DIM = 8
 
-# ---------------------------------------------------------
+# ============================================================
+# EDGE CONFIGURATION
+# ============================================================
+
+EDGE_DIM = 16
+EDGE_ENCODER_HIDDEN = 16
+
+
+# ============================================================
 # REGULARIZATION
-# ---------------------------------------------------------
+# ============================================================
 
-# Strong dropout is important for the tiny Planetoid
-# training sets.
-FEATURE_DROPOUT = 0.0
-ATTENTION_DROPOUT = 0.60
-CLASSIFIER_DROPOUT = 0.60
+FEATURE_DROPOUT = 0.45
+ATTENTION_DROPOUT = 0.35
 EDGE_DROPOUT = 0.10
+CLASSIFIER_DROPOUT = 0.45
 
-# ---------------------------------------------------------
+
+# ============================================================
 # OPTIMIZATION
-# ---------------------------------------------------------
+# ============================================================
 
-# Close to the classic GAT training recipe
-LEARNING_RATE = 0.005
-WEIGHT_DECAY = 5e-4
+LEARNING_RATE = 0.002
+WEIGHT_DECAY = 0.005
 
-EPOCHS = 200
-PATIENCE = 40
 
+# ============================================================
+# LABEL SMOOTHING
+# ============================================================
+
+LABEL_SMOOTHING = 0.02
+
+
+# ============================================================
+# TRAINING
+# ============================================================
+
+EPOCHS = 400
+PATIENCE = 50
 GRADIENT_CLIP = 1.0
 
-# ---------------------------------------------------------
-# LR SCHEDULER
-# ---------------------------------------------------------
 
-LR_SCHEDULER_PATIENCE = 15
+# ============================================================
+# LR SCHEDULER
+# ============================================================
+
+LR_SCHEDULER_PATIENCE = 10
 LR_SCHEDULER_FACTOR = 0.5
 MIN_LEARNING_RATE = 1e-5
 
-# ---------------------------------------------------------
-# EDGE ENCODERS
-# ---------------------------------------------------------
 
-EDGE_ENCODER_HIDDEN = 16
-AE_EDGE_CONTEXT_DROPOUT = 0.10
+# ============================================================
+# CHECKPOINT SELECTION
+# ============================================================
 
-# ---------------------------------------------------------
-# LOSS
-# ---------------------------------------------------------
-
-# Do NOT use label smoothing here.
-#
-# The classic benchmark recipe uses ordinary cross entropy,
-# and our objective is to reproduce a strong baseline first.
-LABEL_SMOOTHING = 0.0
-
-# ---------------------------------------------------------
-# EXPERIMENT
-# ---------------------------------------------------------
-
-DETERMINISTIC = True
+# Model selection is based on validation Macro-F1.
+# Test set is evaluated only after restoring the best checkpoint.
+CHECKPOINT_METRIC = "Macro F1"

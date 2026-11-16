@@ -1,96 +1,121 @@
 from pathlib import Path
+
 import json
 
 import pandas as pd
 
 
-RESULTS_DIR = Path("results")
+RESULTS_DIR = Path(
+    "results"
+)
 
 
-def save_results(results):
+def save_results(
+    results
+):
 
     RESULTS_DIR.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    df = pd.DataFrame(
-        results
+    dataframe = (
+        pd.DataFrame(
+            results
+        )
     )
 
     csv_path = (
-        RESULTS_DIR
-        / "all_results.csv"
+        RESULTS_DIR /
+        "all_results.csv"
     )
 
     json_path = (
-        RESULTS_DIR
-        / "all_results.json"
+        RESULTS_DIR /
+        "all_results.json"
     )
 
     excel_path = (
-        RESULTS_DIR
-        / "GAT_Research_Results.xlsx"
+        RESULTS_DIR /
+        "GAT_Research_Results.xlsx"
     )
 
-    df.to_csv(
+    # ========================================================
+    # CSV
+    # ========================================================
+
+    dataframe.to_csv(
         csv_path,
         index=False,
     )
+
+    # ========================================================
+    # JSON
+    # ========================================================
 
     with open(
         json_path,
         "w",
         encoding="utf-8",
-    ) as f:
+    ) as file:
 
         json.dump(
             results,
-            f,
+            file,
             indent=2,
         )
+
+    # ========================================================
+    # EXCEL
+    # ========================================================
 
     with pd.ExcelWriter(
         excel_path,
         engine="openpyxl",
     ) as writer:
 
-        df.to_excel(
+        dataframe.to_excel(
             writer,
             sheet_name="All Results",
             index=False,
         )
 
+        # Dataset sheets
         for dataset_name in (
-            df["Dataset"]
-            .unique()
+            dataframe[
+                "Dataset"
+            ].unique()
         ):
 
-            dataset_df = df[
-                df["Dataset"]
-                == dataset_name
+            subset = dataframe[
+                dataframe[
+                    "Dataset"
+                ]
+                ==
+                dataset_name
             ]
 
-            dataset_df.to_excel(
+            subset.to_excel(
                 writer,
-                sheet_name=dataset_name[
-                    :31
-                ],
+                sheet_name=
+                    dataset_name[:31],
                 index=False,
             )
 
-        metric_columns = [
-            "Validation Accuracy",
-            "Test Accuracy",
-            "Macro Precision",
-            "Macro Recall",
-            "Macro F1",
-            "Weighted F1",
-        ]
-
+        # Model average
         model_average = (
-            df.groupby("Model")[
-                metric_columns
+            dataframe
+            .groupby("Model")
+            [
+                [
+                    "Validation Accuracy",
+                    "Validation Macro F1",
+                    "Test Accuracy",
+                    "Macro Precision",
+                    "Macro Recall",
+                    "Macro F1",
+                    "Weighted F1",
+                ]
             ]
             .mean()
             .reset_index()
@@ -102,9 +127,20 @@ def save_results(results):
             index=False,
         )
 
+        # Dataset average
         dataset_average = (
-            df.groupby("Dataset")[
-                metric_columns
+            dataframe
+            .groupby("Dataset")
+            [
+                [
+                    "Validation Accuracy",
+                    "Validation Macro F1",
+                    "Test Accuracy",
+                    "Macro Precision",
+                    "Macro Recall",
+                    "Macro F1",
+                    "Weighted F1",
+                ]
             ]
             .mean()
             .reset_index()
@@ -116,33 +152,54 @@ def save_results(results):
             index=False,
         )
 
-        best_per_dataset = (
-            df.loc[
-                df.groupby(
+        # Best model by test accuracy
+        best_test = (
+            dataframe.loc[
+                dataframe
+                .groupby(
                     "Dataset"
                 )[
                     "Test Accuracy"
-                ].idxmax()
+                ]
+                .idxmax()
             ]
             .reset_index(
                 drop=True
             )
         )
 
-        best_per_dataset.to_excel(
+        best_test.to_excel(
             writer,
-            sheet_name="Best Per Dataset",
+            sheet_name="Best Test",
+            index=False,
+        )
+
+        # Best model by validation F1
+        best_val_f1 = (
+            dataframe.loc[
+                dataframe
+                .groupby(
+                    "Dataset"
+                )[
+                    "Validation Macro F1"
+                ]
+                .idxmax()
+            ]
+            .reset_index(
+                drop=True
+            )
+        )
+
+        best_val_f1.to_excel(
+            writer,
+            sheet_name="Best Validation F1",
             index=False,
         )
 
     print()
     print("=" * 70)
-    print("RESULT FILES")
+    print("RESULTS SAVED")
     print("=" * 70)
-
-    print(
-        f"Excel : {excel_path}"
-    )
 
     print(
         f"CSV   : {csv_path}"
@@ -150,4 +207,8 @@ def save_results(results):
 
     print(
         f"JSON  : {json_path}"
+    )
+
+    print(
+        f"Excel : {excel_path}"
     )

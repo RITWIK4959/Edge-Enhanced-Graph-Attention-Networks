@@ -1,8 +1,26 @@
 import torch
+
 from torch import nn
 
 
 class LearnedEdgeEncoder(nn.Module):
+
+    """
+    Lightweight trainable edge encoder.
+
+    Input:
+        source node representation
+        target node representation
+
+    Uses:
+        source
+        target
+        absolute difference
+
+    This is intentionally small because the datasets
+    contain very few labelled training nodes.
+    """
+
     def __init__(
         self,
         node_dim,
@@ -10,64 +28,44 @@ class LearnedEdgeEncoder(nn.Module):
         hidden_dim=16,
         dropout=0.10,
     ):
+
         super().__init__()
+
+        input_dim = (
+            3 * node_dim
+        )
 
         self.network = nn.Sequential(
-            nn.Linear(2 * node_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, edge_dim),
+
+            nn.Linear(
+                input_dim,
+                hidden_dim,
+            ),
+
+            nn.GELU(),
+
+            nn.Dropout(
+                dropout
+            ),
+
+            nn.Linear(
+                hidden_dim,
+                edge_dim,
+            ),
         )
 
-        self.norm = nn.LayerNorm(edge_dim)
-
-    def forward(self, source, target):
-        pair = torch.cat(
-            [source, target],
-            dim=-1,
+        self.norm = nn.LayerNorm(
+            edge_dim
         )
 
-        edge = self.network(pair)
-
-        return self.norm(edge)
-
-
-class AdaptiveEdgeEncoder(nn.Module):
-    def __init__(
+    def forward(
         self,
-        node_dim,
-        edge_dim,
-        hidden_dim=16,
-        dropout=0.10,
+        source,
+        target,
     ):
-        super().__init__()
-
-        pair_dim = 4 * node_dim
-
-        self.value = nn.Sequential(
-            nn.Linear(pair_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, edge_dim),
-        )
-
-        self.gate = nn.Sequential(
-            nn.Linear(pair_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, edge_dim),
-        )
-
-        self.norm = nn.LayerNorm(edge_dim)
-
-    def forward(self, source, target):
 
         difference = torch.abs(
             source - target
-        )
-
-        interaction = (
-            source * target
         )
 
         pair = torch.cat(
@@ -75,27 +73,38 @@ class AdaptiveEdgeEncoder(nn.Module):
                 source,
                 target,
                 difference,
-                interaction,
             ],
             dim=-1,
         )
 
-        value = self.value(pair)
-
-        gate = torch.sigmoid(
-            self.gate(pair)
+        edge = self.network(
+            pair
         )
 
-        edge = value * gate
+        edge = self.norm(
+            edge
+        )
 
-        return self.norm(edge)
+        return edge
 
 
-def static_edge_attributes(
+def create_static_edge_attributes(
     node_features,
     edge_index,
     edge_dim,
 ):
+
+    """
+    Static edge representation.
+
+    No trainable parameters.
+
+    e_ij = 0.5 * (x_i + x_j)
+
+    The representation is then truncated/padded
+    to EDGE_DIM.
+    """
+
     source = node_features[
         edge_index[0]
     ]
@@ -104,28 +113,35 @@ def static_edge_attributes(
         edge_index[1]
     ]
 
-    # Simple symmetric edge representation
-    edge = 0.5 * (
+    edge = (
         source + target
-    )
+    ) / 2.0
 
-    current_dim = edge.size(-1)
+    current_dim = (
+        edge.size(-1)
+    )
 
     if current_dim > edge_dim:
 
-        edge = edge[:, :edge_dim]
+        edge = edge[
+            :, :edge_dim
+        ]
 
     elif current_dim < edge_dim:
 
         padding = torch.zeros(
             edge.size(0),
-            edge_dim - current_dim,
+            edge_dim -
+            current_dim,
             device=edge.device,
             dtype=edge.dtype,
         )
 
         edge = torch.cat(
-            [edge, padding],
+            [
+                edge,
+                padding,
+            ],
             dim=-1,
         )
 

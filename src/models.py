@@ -1,4 +1,3 @@
-import torch
 import torch.nn.functional as F
 
 from torch import nn
@@ -10,244 +9,373 @@ from torch_geometric.nn import (
 
 from .edge_encoder import (
     LearnedEdgeEncoder,
-    AdaptiveEdgeEncoder,
 )
 
 
-class BaseGATModel(nn.Module):
+# ============================================================
+# INPUT PROJECTION
+# ============================================================
+
+class InputProjection(nn.Module):
 
     def __init__(
         self,
         in_channels,
-        num_classes,
-        hidden_channels=8,
-        heads=8,
-        attention_dropout=0.6,
-        classifier_dropout=0.6,
+        hidden_channels,
+        dropout,
     ):
+
         super().__init__()
 
-        self.feature_dropout = nn.Dropout(
-            p=0.0
+        self.linear = nn.Linear(
+            in_channels,
+            hidden_channels,
         )
 
-        self.attention_dropout = (
-            attention_dropout
-        )
-
-        self.classifier_dropout = (
-            classifier_dropout
-        )
-
-        self.hidden_channels = (
+        self.norm = nn.LayerNorm(
             hidden_channels
         )
 
-        self.heads = heads
-
-        self.input_projection = nn.Linear(
-            in_channels,
-            hidden_channels * heads,
-            bias=False,
+        self.dropout = nn.Dropout(
+            dropout
         )
 
-        self.classifier = nn.Linear(
-            hidden_channels * heads,
-            num_classes,
-        )
+    def forward(self, x):
 
-    def classify(self, x):
+        x = self.linear(x)
 
-        x = F.dropout(
-            x,
-            p=self.classifier_dropout,
-            training=self.training,
-        )
-
-        return self.classifier(x)
-
-
-class GATModel(BaseGATModel):
-
-    def __init__(
-        self,
-        in_channels,
-        num_classes,
-        hidden_channels=8,
-        heads=8,
-        attention_dropout=0.6,
-        classifier_dropout=0.6,
-        **kwargs,
-    ):
-        super().__init__(
-            in_channels,
-            num_classes,
-            hidden_channels,
-            heads,
-            attention_dropout,
-            classifier_dropout,
-        )
-
-        self.conv1 = GATConv(
-            in_channels,
-            hidden_channels,
-            heads=heads,
-            concat=True,
-            dropout=attention_dropout,
-            add_self_loops=True,
-        )
-
-        self.conv2 = GATConv(
-            hidden_channels * heads,
-            num_classes,
-            heads=1,
-            concat=False,
-            dropout=attention_dropout,
-            add_self_loops=True,
-        )
-
-    def forward(
-        self,
-        x,
-        edge_index,
-        edge_attr=None,
-    ):
-        x = F.dropout(
-            x,
-            p=self.classifier_dropout,
-            training=self.training,
-        )
-
-        x = self.conv1(
-            x,
-            edge_index,
-        )
+        x = self.norm(x)
 
         x = F.elu(x)
 
-        x = F.dropout(
-            x,
-            p=self.classifier_dropout,
-            training=self.training,
-        )
-
-        x = self.conv2(
-            x,
-            edge_index,
-        )
+        x = self.dropout(x)
 
         return x
 
 
-class GATv2Model(BaseGATModel):
+# ============================================================
+# SMALL CLASSIFIER
+# ============================================================
+
+class Classifier(nn.Module):
+
+    """
+    Smaller classifier to reduce overfitting.
+
+    Instead of:
+        hidden -> hidden -> classes
+
+    use:
+        hidden -> classes
+    """
 
     def __init__(
         self,
-        in_channels,
+        hidden_channels,
         num_classes,
-        hidden_channels=8,
-        heads=8,
-        attention_dropout=0.6,
-        classifier_dropout=0.6,
-        **kwargs,
+        dropout,
     ):
-        super().__init__(
-            in_channels,
-            num_classes,
-            hidden_channels,
-            heads,
-            attention_dropout,
-            classifier_dropout,
-        )
 
-        self.conv1 = GATv2Conv(
-            in_channels,
-            hidden_channels,
-            heads=heads,
-            concat=True,
-            dropout=attention_dropout,
-            add_self_loops=True,
-        )
-
-        self.conv2 = GATv2Conv(
-            hidden_channels * heads,
-            num_classes,
-            heads=1,
-            concat=False,
-            dropout=attention_dropout,
-            add_self_loops=True,
-        )
-
-    def forward(
-        self,
-        x,
-        edge_index,
-        edge_attr=None,
-    ):
-        x = F.dropout(
-            x,
-            p=self.classifier_dropout,
-            training=self.training,
-        )
-
-        x = self.conv1(
-            x,
-            edge_index,
-        )
-
-        x = F.elu(x)
-
-        x = F.dropout(
-            x,
-            p=self.classifier_dropout,
-            training=self.training,
-        )
-
-        x = self.conv2(
-            x,
-            edge_index,
-        )
-
-        return x
-
-
-class GATv2StaticEdge(nn.Module):
-
-    def __init__(
-        self,
-        in_channels,
-        num_classes,
-        hidden_channels=8,
-        heads=8,
-        edge_dim=8,
-        attention_dropout=0.6,
-        classifier_dropout=0.6,
-        **kwargs,
-    ):
         super().__init__()
 
-        self.conv1 = GATv2Conv(
+        self.dropout = nn.Dropout(
+            dropout
+        )
+
+        self.linear = nn.Linear(
+            hidden_channels,
+            num_classes,
+        )
+
+    def forward(self, x):
+
+        x = self.dropout(x)
+
+        return self.linear(x)
+
+
+# ============================================================
+# GAT
+# ============================================================
+
+class GATModel(nn.Module):
+
+    def __init__(
+        self,
+        in_channels,
+        num_classes,
+        hidden_channels=64,
+        heads=4,
+        feature_dropout=0.45,
+        attention_dropout=0.35,
+        classifier_dropout=0.45,
+    ):
+
+        super().__init__()
+
+        self.input = InputProjection(
             in_channels,
             hidden_channels,
+            feature_dropout,
+        )
+
+        # Layer 1
+        self.conv1 = GATConv(
+            hidden_channels,
+            hidden_channels // heads,
+            heads=heads,
+            concat=True,
+            dropout=attention_dropout,
+        )
+
+        # Layer 2
+        self.conv2 = GATConv(
+            hidden_channels,
+            hidden_channels,
+            heads=1,
+            concat=False,
+            dropout=attention_dropout,
+        )
+
+        self.norm1 = nn.LayerNorm(
+            hidden_channels
+        )
+
+        self.norm2 = nn.LayerNorm(
+            hidden_channels
+        )
+
+        self.dropout = nn.Dropout(
+            feature_dropout
+        )
+
+        self.classifier = Classifier(
+            hidden_channels,
+            num_classes,
+            classifier_dropout,
+        )
+
+    def forward(
+        self,
+        x,
+        edge_index,
+        edge_attr=None,
+    ):
+
+        x = self.input(x)
+
+        h = self.conv1(
+            x,
+            edge_index,
+        )
+
+        h = self.norm1(
+            h
+        )
+
+        h = F.elu(h)
+
+        h = self.dropout(
+            h
+        )
+
+        # Residual connection
+        x = x + h
+
+        h = self.conv2(
+            x,
+            edge_index,
+        )
+
+        h = self.norm2(
+            h
+        )
+
+        h = F.elu(h)
+
+        h = self.dropout(
+            h
+        )
+
+        x = x + h
+
+        return self.classifier(
+            x
+        )
+
+
+# ============================================================
+# GATv2
+# ============================================================
+
+class GATv2Model(nn.Module):
+
+    def __init__(
+        self,
+        in_channels,
+        num_classes,
+        hidden_channels=64,
+        heads=4,
+        feature_dropout=0.45,
+        attention_dropout=0.35,
+        classifier_dropout=0.45,
+    ):
+
+        super().__init__()
+
+        self.input = InputProjection(
+            in_channels,
+            hidden_channels,
+            feature_dropout,
+        )
+
+        self.conv1 = GATv2Conv(
+            hidden_channels,
+            hidden_channels // heads,
+            heads=heads,
+            concat=True,
+            dropout=attention_dropout,
+        )
+
+        self.conv2 = GATv2Conv(
+            hidden_channels,
+            hidden_channels,
+            heads=1,
+            concat=False,
+            dropout=attention_dropout,
+        )
+
+        self.norm1 = nn.LayerNorm(
+            hidden_channels
+        )
+
+        self.norm2 = nn.LayerNorm(
+            hidden_channels
+        )
+
+        self.dropout = nn.Dropout(
+            feature_dropout
+        )
+
+        self.classifier = Classifier(
+            hidden_channels,
+            num_classes,
+            classifier_dropout,
+        )
+
+    def forward(
+        self,
+        x,
+        edge_index,
+        edge_attr=None,
+    ):
+
+        x = self.input(x)
+
+        h = self.conv1(
+            x,
+            edge_index,
+        )
+
+        h = self.norm1(
+            h
+        )
+
+        h = F.elu(h)
+
+        h = self.dropout(
+            h
+        )
+
+        x = x + h
+
+        h = self.conv2(
+            x,
+            edge_index,
+        )
+
+        h = self.norm2(
+            h
+        )
+
+        h = F.elu(h)
+
+        h = self.dropout(
+            h
+        )
+
+        x = x + h
+
+        return self.classifier(
+            x
+        )
+
+
+# ============================================================
+# GATv2 + STATIC EDGE
+# ============================================================
+
+class GATv2StaticEdgeModel(nn.Module):
+
+    def __init__(
+        self,
+        in_channels,
+        num_classes,
+        hidden_channels=64,
+        heads=4,
+        edge_dim=16,
+        feature_dropout=0.45,
+        attention_dropout=0.35,
+        classifier_dropout=0.45,
+        edge_dropout=0.10,
+    ):
+
+        super().__init__()
+
+        self.input = InputProjection(
+            in_channels,
+            hidden_channels,
+            feature_dropout,
+        )
+
+        self.conv1 = GATv2Conv(
+            hidden_channels,
+            hidden_channels // heads,
             heads=heads,
             concat=True,
             dropout=attention_dropout,
             edge_dim=edge_dim,
-            add_self_loops=True,
         )
 
         self.conv2 = GATv2Conv(
-            hidden_channels * heads,
-            num_classes,
+            hidden_channels,
+            hidden_channels,
             heads=1,
             concat=False,
             dropout=attention_dropout,
             edge_dim=edge_dim,
-            add_self_loops=True,
         )
 
-        self.classifier_dropout = (
-            classifier_dropout
+        self.norm1 = nn.LayerNorm(
+            hidden_channels
+        )
+
+        self.norm2 = nn.LayerNorm(
+            hidden_channels
+        )
+
+        self.dropout = nn.Dropout(
+            feature_dropout
+        )
+
+        self.edge_dropout = nn.Dropout(
+            edge_dropout
+        )
+
+        self.classifier = Classifier(
+            hidden_channels,
+            num_classes,
+            classifier_dropout,
         )
 
     def forward(
@@ -256,88 +384,146 @@ class GATv2StaticEdge(nn.Module):
         edge_index,
         edge_attr,
     ):
-        x = F.dropout(
-            x,
-            p=self.classifier_dropout,
-            training=self.training,
+
+        x = self.input(x)
+
+        edge_attr = self.edge_dropout(
+            edge_attr
         )
 
-        x = self.conv1(
-            x,
-            edge_index,
-            edge_attr=edge_attr,
-        )
-
-        x = F.elu(x)
-
-        x = F.dropout(
-            x,
-            p=self.classifier_dropout,
-            training=self.training,
-        )
-
-        x = self.conv2(
+        h = self.conv1(
             x,
             edge_index,
-            edge_attr=edge_attr,
+            edge_attr,
         )
 
-        return x
+        h = self.norm1(
+            h
+        )
+
+        h = F.elu(h)
+
+        h = self.dropout(
+            h
+        )
+
+        x = x + h
+
+        h = self.conv2(
+            x,
+            edge_index,
+            edge_attr,
+        )
+
+        h = self.norm2(
+            h
+        )
+
+        h = F.elu(h)
+
+        h = self.dropout(
+            h
+        )
+
+        x = x + h
+
+        return self.classifier(
+            x
+        )
 
 
-class DynamicEdgeGATv2(nn.Module):
+# ============================================================
+# GATv2 + LEARNED EDGE
+# ============================================================
+
+class GATv2LearnedEdgeModel(nn.Module):
 
     def __init__(
         self,
         in_channels,
         num_classes,
-        edge_encoder,
-        hidden_channels=8,
-        heads=8,
-        edge_dim=8,
-        attention_dropout=0.6,
-        classifier_dropout=0.6,
+        hidden_channels=64,
+        heads=4,
+        edge_dim=16,
+        edge_encoder_hidden=16,
+        feature_dropout=0.45,
+        attention_dropout=0.35,
+        classifier_dropout=0.45,
     ):
+
         super().__init__()
 
-        self.edge_encoder = edge_encoder
-
-        self.input_projection = nn.Linear(
+        self.input = InputProjection(
             in_channels,
-            hidden_channels * heads,
+            hidden_channels,
+            feature_dropout,
+        )
+
+        self.edge_encoder1 = (
+            LearnedEdgeEncoder(
+                node_dim=hidden_channels,
+                edge_dim=edge_dim,
+                hidden_dim=edge_encoder_hidden,
+            )
+        )
+
+        self.edge_encoder2 = (
+            LearnedEdgeEncoder(
+                node_dim=hidden_channels,
+                edge_dim=edge_dim,
+                hidden_dim=edge_encoder_hidden,
+            )
         )
 
         self.conv1 = GATv2Conv(
-            hidden_channels * heads,
             hidden_channels,
+            hidden_channels // heads,
             heads=heads,
             concat=True,
             dropout=attention_dropout,
             edge_dim=edge_dim,
-            add_self_loops=True,
         )
 
         self.conv2 = GATv2Conv(
-            hidden_channels * heads,
-            num_classes,
+            hidden_channels,
+            hidden_channels,
             heads=1,
             concat=False,
             dropout=attention_dropout,
             edge_dim=edge_dim,
-            add_self_loops=True,
         )
 
-        self.classifier_dropout = (
-            classifier_dropout
+        self.norm1 = nn.LayerNorm(
+            hidden_channels
         )
 
-        self.edge_dim = edge_dim
+        self.norm2 = nn.LayerNorm(
+            hidden_channels
+        )
 
-    def make_edge_attr(
+        self.dropout = nn.Dropout(
+            feature_dropout
+        )
+
+        self.classifier = Classifier(
+            hidden_channels,
+            num_classes,
+            classifier_dropout,
+        )
+
+    def forward(
         self,
         x,
         edge_index,
+        edge_attr=None,
     ):
+
+        x = self.input(x)
+
+        # ----------------------------------------------------
+        # First learned edge representation
+        # ----------------------------------------------------
+
         source = x[
             edge_index[0]
         ]
@@ -346,137 +532,132 @@ class DynamicEdgeGATv2(nn.Module):
             edge_index[1]
         ]
 
-        edge_attr = self.edge_encoder(
-            source,
-            target,
-        )
-
-        if self.training:
-            edge_attr = F.dropout(
-                edge_attr,
-                p=0.10,
-                training=True,
+        learned_edge1 = (
+            self.edge_encoder1(
+                source,
+                target,
             )
-
-        return edge_attr
-
-    def forward(
-        self,
-        x,
-        edge_index,
-    ):
-        x = F.dropout(
-            x,
-            p=self.classifier_dropout,
-            training=self.training,
         )
 
-        x = self.input_projection(x)
-
-        edge_attr = self.make_edge_attr(
+        h = self.conv1(
             x,
             edge_index,
+            learned_edge1,
         )
 
-        x = self.conv1(
+        h = self.norm1(
+            h
+        )
+
+        h = F.elu(h)
+
+        h = self.dropout(
+            h
+        )
+
+        x = x + h
+
+        # ----------------------------------------------------
+        # Second learned edge representation
+        # ----------------------------------------------------
+
+        source = x[
+            edge_index[0]
+        ]
+
+        target = x[
+            edge_index[1]
+        ]
+
+        learned_edge2 = (
+            self.edge_encoder2(
+                source,
+                target,
+            )
+        )
+
+        h = self.conv2(
             x,
             edge_index,
-            edge_attr=edge_attr,
+            learned_edge2,
         )
 
-        x = F.elu(x)
-
-        x = F.dropout(
-            x,
-            p=self.classifier_dropout,
-            training=self.training,
+        h = self.norm2(
+            h
         )
 
-        edge_attr = self.make_edge_attr(
-            x,
-            edge_index,
+        h = F.elu(h)
+
+        h = self.dropout(
+            h
         )
 
-        x = self.conv2(
-            x,
-            edge_index,
-            edge_attr=edge_attr,
+        x = x + h
+
+        return self.classifier(
+            x
         )
 
-        return x
 
+# ============================================================
+# MODEL FACTORY
+# ============================================================
 
-class GATv2LearnedEdge(
-    DynamicEdgeGATv2
+def build_model(
+    model_name,
+    in_channels,
+    num_classes,
 ):
 
-    def __init__(
-        self,
-        in_channels,
-        num_classes,
-        hidden_channels=8,
-        heads=8,
-        edge_dim=8,
-        edge_encoder_hidden=16,
-        attention_dropout=0.6,
-        classifier_dropout=0.6,
-        **kwargs,
+    common = dict(
+
+        in_channels=in_channels,
+
+        num_classes=num_classes,
+
+        hidden_channels=64,
+
+        heads=4,
+
+        feature_dropout=0.45,
+
+        attention_dropout=0.35,
+
+        classifier_dropout=0.45,
+    )
+
+    if model_name == "GAT":
+
+        return GATModel(
+            **common
+        )
+
+    if model_name == "GATv2":
+
+        return GATv2Model(
+            **common
+        )
+
+    if model_name == (
+        "GATv2 + Static Edge"
     ):
 
-        encoder = LearnedEdgeEncoder(
-            node_dim=hidden_channels * heads,
-            edge_dim=edge_dim,
-            hidden_dim=edge_encoder_hidden,
-            dropout=0.10,
+        return GATv2StaticEdgeModel(
+            **common,
+            edge_dim=16,
+            edge_dropout=0.10,
         )
 
-        super().__init__(
-            in_channels=in_channels,
-            num_classes=num_classes,
-            edge_encoder=encoder,
-            hidden_channels=hidden_channels,
-            heads=heads,
-            edge_dim=edge_dim,
-            attention_dropout=attention_dropout,
-            classifier_dropout=classifier_dropout,
-        )
-
-
-class AEGAT(
-    DynamicEdgeGATv2
-):
-
-    def __init__(
-        self,
-        in_channels,
-        num_classes,
-        hidden_channels=8,
-        heads=8,
-        edge_dim=8,
-        edge_encoder_hidden=16,
-        attention_dropout=0.6,
-        classifier_dropout=0.6,
-        **kwargs,
+    if model_name == (
+        "GATv2 + Learned Edge"
     ):
 
-        node_dim = (
-            hidden_channels * heads
+        return GATv2LearnedEdgeModel(
+            **common,
+            edge_dim=16,
+            edge_encoder_hidden=16,
         )
 
-        encoder = AdaptiveEdgeEncoder(
-            node_dim=node_dim,
-            edge_dim=edge_dim,
-            hidden_dim=edge_encoder_hidden,
-            dropout=0.10,
-        )
-
-        super().__init__(
-            in_channels=in_channels,
-            num_classes=num_classes,
-            edge_encoder=encoder,
-            hidden_channels=hidden_channels,
-            heads=heads,
-            edge_dim=edge_dim,
-            attention_dropout=attention_dropout,
-            classifier_dropout=classifier_dropout,
-        )
+    raise ValueError(
+        f"Unknown model: {model_name}"
+    )

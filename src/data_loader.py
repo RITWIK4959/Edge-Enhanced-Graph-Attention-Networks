@@ -1,34 +1,75 @@
+import random
+
+import numpy as np
 import torch
 
 from torch_geometric.datasets import Planetoid
 from torch_geometric.transforms import NormalizeFeatures
 
-from .config import DATASET_ROOT, DEVICE
+from .config import (
+    DATASET_ROOT,
+    CPU_NUM_THREADS,
+)
 
 
-def load_dataset(dataset_name):
+def set_seed(seed):
+
+    random.seed(seed)
+
+    np.random.seed(seed)
+
+    torch.manual_seed(seed)
+
+    if torch.cuda.is_available():
+
+        torch.cuda.manual_seed(seed)
+
+        torch.cuda.manual_seed_all(seed)
+
+    torch.backends.cudnn.deterministic = True
+
+    torch.backends.cudnn.benchmark = False
+
+
+def configure_cpu():
+
+    torch.set_num_threads(
+        CPU_NUM_THREADS
+    )
+
+
+def load_dataset(name):
+
     dataset = Planetoid(
-        root=DATASET_ROOT,
-        name=dataset_name,
-        split="public",
+        root=f"{DATASET_ROOT}/{name}",
+        name=name,
         transform=NormalizeFeatures(),
     )
 
-    data = dataset[0].to(DEVICE)
+    data = dataset[0]
 
     return dataset, data
 
 
-def print_dataset_statistics(dataset_name, dataset, data):
-    print("=" * 60)
-    print(f"Dataset: {dataset_name}")
-    print("=" * 60)
+def dataset_info(dataset, data):
 
-    print(f"Nodes          : {data.num_nodes}")
-    print(f"Edges          : {data.edge_index.size(1)}")
-    print(f"Node features  : {dataset.num_node_features}")
-    print(f"Classes        : {dataset.num_classes}")
-    print(f"Train nodes    : {int(data.train_mask.sum())}")
-    print(f"Validation     : {int(data.val_mask.sum())}")
-    print(f"Test nodes     : {int(data.test_mask.sum())}")
-    print()
+    return {
+        "dataset": dataset.name,
+
+        "nodes": data.num_nodes,
+
+        "edges": data.edge_index.size(1),
+
+        "features": dataset.num_features,
+
+        "classes": dataset.num_classes,
+
+        "train_nodes":
+            int(data.train_mask.sum()),
+
+        "val_nodes":
+            int(data.val_mask.sum()),
+
+        "test_nodes":
+            int(data.test_mask.sum()),
+    }

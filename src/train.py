@@ -2,7 +2,8 @@ import copy
 import time
 
 import torch
-from torch import nn
+
+import torch.nn as nn
 
 from sklearn.metrics import (
     accuracy_score,
@@ -11,105 +12,155 @@ from sklearn.metrics import (
     f1_score,
 )
 
+
 from .config import (
-    DEVICE,
-    LABEL_SMOOTHING,
+    LEARNING_RATE,
+    WEIGHT_DECAY,
+    EPOCHS,
+    PATIENCE,
     GRADIENT_CLIP,
     LR_SCHEDULER_PATIENCE,
     LR_SCHEDULER_FACTOR,
     MIN_LEARNING_RATE,
+    LABEL_SMOOTHING,
 )
 
+
+# ============================================================
+# METRICS
+# ============================================================
 
 def classification_metrics(
     y_true,
     y_pred,
 ):
+
     return {
-        "accuracy": accuracy_score(
-            y_true,
-            y_pred,
-        ),
-        "macro_precision": precision_score(
-            y_true,
-            y_pred,
-            average="macro",
-            zero_division=0,
-        ),
-        "macro_recall": recall_score(
-            y_true,
-            y_pred,
-            average="macro",
-            zero_division=0,
-        ),
-        "macro_f1": f1_score(
-            y_true,
-            y_pred,
-            average="macro",
-            zero_division=0,
-        ),
-        "weighted_f1": f1_score(
-            y_true,
-            y_pred,
-            average="weighted",
-            zero_division=0,
-        ),
+
+        "Accuracy":
+            accuracy_score(
+                y_true,
+                y_pred,
+            ),
+
+        "Macro Precision":
+            precision_score(
+                y_true,
+                y_pred,
+                average="macro",
+                zero_division=0,
+            ),
+
+        "Macro Recall":
+            recall_score(
+                y_true,
+                y_pred,
+                average="macro",
+                zero_division=0,
+            ),
+
+        "Macro F1":
+            f1_score(
+                y_true,
+                y_pred,
+                average="macro",
+                zero_division=0,
+            ),
+
+        "Weighted F1":
+            f1_score(
+                y_true,
+                y_pred,
+                average="weighted",
+                zero_division=0,
+            ),
     }
 
+
+# ============================================================
+# EVALUATION
+# ============================================================
 
 @torch.no_grad()
 def evaluate(
     model,
     data,
     mask,
+    edge_attr=None,
 ):
+
     model.eval()
 
     logits = model(
         data.x,
         data.edge_index,
+        edge_attr,
     )
 
     predictions = (
-        logits[mask]
-        .argmax(dim=-1)
+        logits.argmax(
+            dim=1
+        )
+    )
+
+    y_true = (
+        data.y[mask]
+        .detach()
         .cpu()
         .numpy()
     )
 
-    labels = (
-        data.y[mask]
+    y_pred = (
+        predictions[mask]
+        .detach()
         .cpu()
         .numpy()
     )
 
     return classification_metrics(
-        labels,
-        predictions,
+        y_true,
+        y_pred,
     )
 
+
+# ============================================================
+# TRAINING
+# ============================================================
 
 def train_model(
     model,
     data,
-    evaluate_test=True,
-    epochs=200,
-    patience=40,
-    learning_rate=0.005,
-    weight_decay=5e-4,
+    device,
+    edge_attr=None,
 ):
 
-    model = model.to(DEVICE)
+    model = model.to(
+        device
+    )
 
-    optimizer = torch.optim.Adam(
+    data = data.to(
+        device
+    )
+
+    if edge_attr is not None:
+
+        edge_attr = edge_attr.to(
+            device
+        )
+
+    # --------------------------------------------------------
+    # Optimizer
+    # --------------------------------------------------------
+
+    optimizer = torch.optim.AdamW(
         model.parameters(),
-        lr=learning_rate,
-        weight_decay=weight_decay,
+        lr=LEARNING_RATE,
+        weight_decay=WEIGHT_DECAY,
     )
 
-    criterion = nn.CrossEntropyLoss(
-        label_smoothing=LABEL_SMOOTHING
-    )
+    # --------------------------------------------------------
+    # Scheduler
+    # --------------------------------------------------------
 
     scheduler = (
         torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -121,32 +172,64 @@ def train_model(
         )
     )
 
-    best_val_accuracy = -1.0
+    # --------------------------------------------------------
+    # Loss
+    # --------------------------------------------------------
+
+    criterion = (
+        nn.CrossEntropyLoss(
+            label_smoothing=
+                LABEL_SMOOTHING
+        )
+    )
+
+    # --------------------------------------------------------
+    # Best checkpoint
+    #
+    # IMPORTANT:
+    # Macro-F1 on validation set is used.
+    # --------------------------------------------------------
+
     best_val_f1 = -1.0
-    best_epoch = 0
+
+    best_val_accuracy = -1.0
+
     best_state = None
 
-    epochs_without_improvement = 0
+    best_epoch = 0
+
+    patience_counter = 0
 
     start_time = time.time()
 
+    # ========================================================
+    # TRAIN
+    # ========================================================
+
     for epoch in range(
         1,
-        epochs + 1,
+        EPOCHS + 1,
     ):
 
         model.train()
 
-        optimizer.zero_grad()
+        optimizer.zero_grad(
+            set_to_none=True
+        )
 
         logits = model(
             data.x,
             data.edge_index,
+            edge_attr,
         )
 
         loss = criterion(
-            logits[data.train_mask],
-            data.y[data.train_mask],
+            logits[
+                data.train_mask
+            ],
+            data.y[
+                data.train_mask
+            ],
         )
 
         loss.backward()
@@ -158,15 +241,23 @@ def train_model(
 
         optimizer.step()
 
-        train_pred = (
-            logits[data.train_mask]
-            .argmax(dim=-1)
+        # ----------------------------------------------------
+        # Training accuracy
+        # ----------------------------------------------------
+
+        train_predictions = (
+            logits.argmax(
+                dim=1
+            )
         )
 
         train_accuracy = (
             (
-                train_pred
-                == data.y[
+                train_predictions[
+                    data.train_mask
+                ]
+                ==
+                data.y[
                     data.train_mask
                 ]
             )
@@ -175,91 +266,122 @@ def train_model(
             .item()
         )
 
+        # ----------------------------------------------------
+        # Validation
+        # ----------------------------------------------------
+
         val_metrics = evaluate(
             model,
             data,
             data.val_mask,
+            edge_attr,
         )
 
         val_accuracy = (
-            val_metrics["accuracy"]
+            val_metrics[
+                "Accuracy"
+            ]
         )
 
         val_f1 = (
-            val_metrics["macro_f1"]
+            val_metrics[
+                "Macro F1"
+            ]
         )
+
+        # ----------------------------------------------------
+        # Scheduler uses validation Macro-F1
+        # ----------------------------------------------------
 
         scheduler.step(
-            val_accuracy
+            val_f1
         )
 
-        improved = (
-            val_accuracy
-            > best_val_accuracy
+        # ----------------------------------------------------
+        # Checkpoint selection
+        #
+        # Primary:
+        #     Macro F1
+        #
+        # Tie breaker:
+        #     Accuracy
+        # ----------------------------------------------------
+
+        is_better = (
+            val_f1 > best_val_f1
             or (
-                abs(
-                    val_accuracy
-                    - best_val_accuracy
-                ) < 1e-12
-                and val_f1
-                > best_val_f1
+                val_f1 == best_val_f1
+                and
+                val_accuracy >
+                best_val_accuracy
             )
         )
 
-        if improved:
+        if is_better:
+
+            best_val_f1 = val_f1
 
             best_val_accuracy = (
                 val_accuracy
             )
 
-            best_val_f1 = val_f1
-
             best_epoch = epoch
 
-            best_state = copy.deepcopy(
-                model.state_dict()
+            best_state = (
+                copy.deepcopy(
+                    model.state_dict()
+                )
             )
 
-            epochs_without_improvement = 0
+            patience_counter = 0
 
         else:
 
-            epochs_without_improvement += 1
+            patience_counter += 1
+
+        # ----------------------------------------------------
+        # Logging
+        # ----------------------------------------------------
 
         if (
             epoch == 1
-            or epoch % 10 == 0
-            or improved
+            or epoch % 25 == 0
         ):
 
             current_lr = (
-                optimizer.param_groups[0]["lr"]
+                optimizer
+                .param_groups[0]
+                ["lr"]
             )
 
             print(
-                f"Epoch {epoch:03d} | "
+                f"Epoch {epoch:4d} | "
                 f"Loss {loss.item():.4f} | "
                 f"Train {train_accuracy:.4f} | "
-                f"Val {val_accuracy:.4f} | "
+                f"Val Acc {val_accuracy:.4f} | "
                 f"Val F1 {val_f1:.4f} | "
                 f"LR {current_lr:.6f}"
             )
 
+        # ----------------------------------------------------
+        # Early stopping
+        # ----------------------------------------------------
+
         if (
-            epochs_without_improvement
-            >= patience
+            patience_counter
+            >= PATIENCE
         ):
 
             print(
-                f"Early stopping at epoch {epoch}"
+                f"Early stopping at "
+                f"epoch {epoch}"
             )
 
             break
 
-    training_time = (
-        time.time()
-        - start_time
-    )
+    # ========================================================
+    # RESTORE BEST VALIDATION CHECKPOINT
+    # ========================================================
 
     if best_state is not None:
 
@@ -267,78 +389,69 @@ def train_model(
             best_state
         )
 
-    best_val_metrics = evaluate(
+    # ========================================================
+    # FINAL TEST
+    #
+    # This is performed ONLY after
+    # selecting the validation checkpoint.
+    # ========================================================
+
+    test_metrics = evaluate(
         model,
         data,
-        data.val_mask,
+        data.test_mask,
+        edge_attr,
     )
 
-    if evaluate_test:
-
-        test_metrics = evaluate(
-            model,
-            data,
-            data.test_mask,
-        )
-
-    else:
-
-        test_metrics = {
-            "accuracy": None,
-            "macro_precision": None,
-            "macro_recall": None,
-            "macro_f1": None,
-            "weighted_f1": None,
-        }
+    training_time = (
+        time.time()
+        - start_time
+    )
 
     parameters = sum(
         p.numel()
         for p in model.parameters()
-        if p.requires_grad
     )
 
     return {
-        "validation_accuracy":
-            best_val_metrics[
-                "accuracy"
-            ],
 
-        "validation_macro_f1":
-            best_val_metrics[
-                "macro_f1"
-            ],
+        "Validation Accuracy":
+            best_val_accuracy,
 
-        "test_accuracy":
+        "Validation Macro F1":
+            best_val_f1,
+
+        "Test Accuracy":
             test_metrics[
-                "accuracy"
+                "Accuracy"
             ],
 
-        "macro_precision":
+        "Macro Precision":
             test_metrics[
-                "macro_precision"
+                "Macro Precision"
             ],
 
-        "macro_recall":
+        "Macro Recall":
             test_metrics[
-                "macro_recall"
+                "Macro Recall"
             ],
 
-        "macro_f1":
+        "Macro F1":
             test_metrics[
-                "macro_f1"
+                "Macro F1"
             ],
 
-        "weighted_f1":
+        "Weighted F1":
             test_metrics[
-                "weighted_f1"
+                "Weighted F1"
             ],
 
-        "parameters":
+        "Parameters":
             parameters,
 
-        "training_time":
-            training_time,
-
-        "best_epoch":
+        "Best Epoch":
             best_epoch,
+
+        "Training Time":
+            training_time,
     }
