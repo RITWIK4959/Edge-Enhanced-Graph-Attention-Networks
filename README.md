@@ -1,290 +1,423 @@
-# Adaptive Edge-Embedding GAT
+# Edge-Enhanced Graph Attention Networks for Node Classification
 
-**Adaptive Edge-Embedding Graph Attention Network (AE-GAT)**
+A reproducible research project comparing **GAT, GATv2, GATv2 with Static Edge Features, and GATv2 with Learned Edge Features** for semi-supervised node classification on the **Cora, CiteSeer, and PubMed** citation-network datasets.
 
-A research project for evaluating graph attention networks with static, learned, and adaptive edge representations on citation-network benchmark datasets.
-
-The project compares:
-
-- GAT
-- GATv2
-- GATv2 + Static Edge
-- GATv2 + Learned Edge
-- AE-GAT
-
-on:
-
-- Cora
-- CiteSeer
-- PubMed
+The project investigates whether incorporating edge information into graph attention mechanisms provides consistent improvements over standard Graph Attention Networks.
 
 ---
 
-## Overview
+## 1. Research Objective
 
-Graph Attention Networks (GATs) learn node representations by assigning attention weights to neighboring nodes.
+The main research question is:
 
-This project investigates whether incorporating edge representations can improve graph attention.
+> **Does incorporating edge information into GATv2 improve node classification compared with standard GAT and GATv2?**
 
-The experimental pipeline compares progressively more expressive models:
+Four models are evaluated under the same experimental protocol:
+
+1. **GAT**
+2. **GATv2**
+3. **GATv2 + Static Edge**
+4. **GATv2 + Learned Edge**
+
+The experiments use identical dataset splits, model depth, hidden dimensionality, optimization settings, checkpoint selection criteria, and evaluation procedures.
+
+---
+
+## 2. Models
+
+### 2.1 GAT
+
+The standard Graph Attention Network uses attention coefficients to determine the importance of neighboring nodes.
+
+\[
+\alpha_{ij} =
+\text{softmax}_j
+\left(
+\text{LeakyReLU}
+\left(
+\mathbf{a}^{T}
+[\mathbf{W}h_i || \mathbf{W}h_j]
+\right)
+\right)
+\]
+
+Neighbor representations are then aggregated using the learned attention weights.
+
+---
+
+### 2.2 GATv2
+
+GATv2 uses dynamic attention in which the ordering of the query and key representations is handled more flexibly than in the original GAT formulation.
+
+The model is implemented using PyTorch Geometric's GATv2 convolution.
+
+---
+
+### 2.3 GATv2 + Static Edge
+
+This model extends GATv2 by incorporating deterministic edge representations.
+
+For an edge connecting nodes \(i\) and \(j\), the static representation is constructed from the node representations:
+
+\[
+e_{ij} =
+\frac{h_i+h_j}{2}
+\]
+
+The resulting representation is projected/truncated to the configured edge dimension.
+
+No additional trainable edge encoder is used.
+
+This provides a controlled test of whether simple edge information can improve GATv2.
+
+---
+
+### 2.4 GATv2 + Learned Edge
+
+The learned-edge model uses a small trainable edge encoder.
+
+For an edge \((i,j)\), the encoder receives:
+
+\[
+[h_i || h_j || |h_i-h_j|]
+\]
+
+and produces a learned edge representation:
+
+\[
+e_{ij}=f_{\theta}(h_i,h_j)
+\]
+
+The edge encoder is intentionally small because the benchmark datasets contain very limited labeled training nodes.
+
+---
+
+## 3. Experimental Architecture
+
+All models use the same general architecture wherever applicable.
+
+### Node representation
 
 ```text
-                         ┌── GAT
-                         │
-                         ├── GATv2
-                         │
-Input Graph ─────────────┼── GATv2 + Static Edge
-                         │
-                         ├── GATv2 + Learned Edge
-                         │
-                         └── AE-GAT
+Input Node Features
+        |
+Linear Projection
+        |
+Layer Normalization
+        |
+ELU
+        |
+Feature Dropout
+        |
+Graph Attention Layer 1
+        |
+Layer Normalization
+        |
+ELU
+        |
+Residual Connection
+        |
+Graph Attention Layer 2
+        |
+Layer Normalization
+        |
+ELU
+        |
+Residual Connection
+        |
+Dropout
+        |
+Linear Classifier
+        |
+Class Prediction
 ```
 
-### Models
+### Configuration
 
-| Model | Description |
-|---|---|
-| GAT | Standard Graph Attention Network |
-| GATv2 | Dynamic attention mechanism |
-| GATv2 + Static Edge | GATv2 using deterministic edge attributes |
-| GATv2 + Learned Edge | GATv2 using learned source-target edge embeddings |
-| AE-GAT | Adaptive edge-embedding GAT with gated edge representations |
-
-The goal is not only to compare accuracy, but also to evaluate:
-
-- Macro Precision
-- Macro Recall
-- Macro F1
-- Weighted F1
-- Trainable parameters
-- Training time
-- Validation performance
+| Parameter | Value |
+|---|---:|
+| Hidden dimension | 64 |
+| Number of GNN layers | 2 |
+| Attention heads | 4 |
+| Edge dimension | 16 |
+| Learned edge hidden dimension | 16 |
+| Feature dropout | 0.45 |
+| Attention dropout | 0.35 |
+| Edge dropout | 0.10 |
+| Classifier dropout | 0.45 |
+| Learning rate | 0.002 |
+| Weight decay | 0.005 |
+| Label smoothing | 0.02 |
+| Maximum epochs | 400 |
+| Early stopping patience | 50 |
+| Gradient clipping | 1.0 |
 
 ---
 
-# 1. Datasets
+# 4. Datasets
 
-The project uses the standard citation-network benchmarks provided through PyTorch Geometric:
+The project evaluates the models on three standard citation-network datasets.
+
+| Dataset | Nodes | Edges | Features | Classes | Train | Validation | Test |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Cora | 2,708 | 10,556 | 1,433 | 7 | 140 | 500 | 1,000 |
+| CiteSeer | 3,327 | 9,104 | 3,703 | 6 | 120 | 500 | 1,000 |
+| PubMed | 19,717 | 88,648 | 500 | 3 | 60 | 500 | 1,000 |
+
+The same predefined train, validation, and test splits are used for all four models.
+
+---
+
+# 5. Reproducibility
+
+The final experiment uses five random seeds:
+
+```python
+SEEDS = (42, 43, 44, 45, 46)
+```
+
+The final reported results are calculated over all five seeds.
+
+### Seed execution
 
 ```text
-Cora
-CiteSeer
-PubMed
+Seed 42
+Seed 43
+Seed 44
+Seed 45
+Seed 46
 ```
 
-The datasets are loaded using the PyTorch Geometric `Planetoid` dataset interface.
+The final paper reports:
 
-The standard public Planetoid split is used.
+\[
+\text{Mean} \pm \text{Standard Deviation}
+\]
 
-Typical split sizes are:
-
-| Dataset | Nodes | Classes | Train | Validation | Test |
-|---|---:|---:|---:|---:|---:|
-| Cora | 2708 | 7 | 140 | 500 | 1000 |
-| CiteSeer | 3327 | 6 | 120 | 500 | 1000 |
-| PubMed | 19717 | 3 | 60 | 500 | 1000 |
-
-The datasets are automatically downloaded when they are not already available.
+over the five runs.
 
 ---
 
-# 2. Requirements
+# 6. Training Procedure
 
-## Python
+Each model is trained independently for each dataset and seed.
 
-Recommended:
+### Optimizer
+
+AdamW:
 
 ```text
-Python 3.11
+Learning Rate = 0.002
+Weight Decay  = 0.005
 ```
 
-Python 3.12 or newer may also work, but Python 3.11 is recommended for reproducible experiments.
+### Loss
 
-Check the installed version:
-
-```bash
-python --version
-```
-
-Expected:
+Cross-entropy with label smoothing:
 
 ```text
-Python 3.11.x
+Label Smoothing = 0.02
 ```
 
----
+### Learning-rate scheduler
 
-# 3. Required Libraries
-
-The project requires:
+`ReduceLROnPlateau` is applied using validation Macro-F1.
 
 ```text
-PyTorch
-PyTorch Geometric
-NumPy
-Pandas
-OpenPyXL
-Scikit-learn
+Scheduler Patience = 10
+Factor             = 0.5
+Minimum LR         = 1e-5
 ```
 
-The project contains a `requirements.txt` file.
+### Early stopping
 
-## requirements.txt
+Training stops when validation Macro-F1 does not improve for 50 epochs.
 
 ```text
-torch>=2.6,<2.15
-torch-geometric>=2.6
-numpy>=1.26
-pandas>=2.2
-openpyxl>=3.1
-scikit-learn>=1.5
+Patience = 50
 ```
 
----
+### Checkpoint selection
 
-# 4. Installation
-
-## Step 1: Clone the repository
-
-```bash
-git clone https://github.com/RITWIK4959/Adaptive-Edge-Embedding-GAT.git
-```
-
-Move into the project:
-
-```bash
-cd Adaptive-Edge-Embedding-GAT
-```
-
----
-
-# 5. Create a Virtual Environment
-
-## Linux / macOS
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-## Windows
-
-```powershell
-python -m venv venv
-venv\Scripts\activate
-```
-
-Verify:
-
-```bash
-python --version
-```
-
----
-
-# 6. Upgrade pip
-
-```bash
-python -m pip install --upgrade pip
-```
-
----
-
-# 7. Install PyTorch
-
-## CPU
-
-The project can run entirely on CPU.
-
-For a CPU-only installation:
-
-```bash
-pip install torch --index-url https://download.pytorch.org/whl/cpu
-```
-
-Verify:
-
-```bash
-python -c "import torch; print(torch.__version__)"
-```
-
----
-
-## NVIDIA GPU
-
-If the system has an NVIDIA GPU, install the PyTorch build appropriate for the system's CUDA version.
-
-Use the official PyTorch installation selector:
-
-https://pytorch.org/get-started/locally/
-
-Then verify CUDA:
-
-```bash
-python -c "import torch; print(torch.cuda.is_available())"
-```
-
-Expected for a working CUDA installation:
+The best checkpoint is selected using:
 
 ```text
-True
+Validation Macro-F1
 ```
 
-If CUDA is unavailable, the project automatically runs on CPU.
+Validation accuracy is used as a secondary tie-breaking criterion.
+
+The test set is evaluated only after restoring the best validation checkpoint.
 
 ---
 
-# 8. Install Project Dependencies
+# 7. Evaluation Metrics
 
-After installing PyTorch:
+The primary evaluation metric is:
 
-```bash
-pip install -r requirements.txt
-```
+### Macro-F1
 
-Verify the important packages:
+Macro-F1 is calculated by taking the unweighted mean of the F1 score across all classes.
 
-```bash
-python -c "import torch; import torch_geometric; import numpy; import pandas; import sklearn; import openpyxl; print('All dependencies installed successfully')"
-```
+This is particularly useful for these datasets because class distributions are not necessarily balanced.
 
----
+Additional reported metrics:
 
-# 9. Dataset Setup
-
-No manual dataset download is normally required.
-
-Run:
-
-```bash
-python -m src.main
-```
-
-PyTorch Geometric downloads the required Planetoid datasets automatically if they are not already present.
-
-The datasets are stored under:
-
-```text
-data/
-```
-
-After downloading, the project will contain directories similar to:
-
-```text
-data/
-├── Cora/
-├── CiteSeer/
-└── PubMed/
-```
-
-Do not commit the downloaded datasets to Git unless explicitly required.
+- Test Accuracy
+- Test Macro-F1
+- Validation Macro-F1
+- Parameter Count
+- Training Time
 
 ---
 
-# 10. Project Structure
+# 8. Final Experimental Results
+
+The following results are based on five random seeds: **42, 43, 44, 45, and 46**.
+
+## Cora
+
+| Model | Test Accuracy | Test Macro-F1 |
+|---|---:|---:|
+| GAT | **77.70 ± 1.28%** | **76.61 ± 1.15%** |
+| GATv2 | 77.50 ± 1.19% | 76.45 ± 1.14% |
+| GATv2 + Static Edge | 77.10 ± 1.07% | 76.03 ± 0.69% |
+| GATv2 + Learned Edge | 77.48 ± 0.92% | 76.42 ± 0.99% |
+
+**Best model:** GAT
+
+---
+
+## CiteSeer
+
+| Model | Test Accuracy | Test Macro-F1 |
+|---|---:|---:|
+| GAT | 67.14 ± 0.28% | 63.82 ± 0.71% |
+| GATv2 | 67.14 ± 0.97% | 63.82 ± 0.84% |
+| GATv2 + Static Edge | **67.60 ± 1.33%** | **64.05 ± 1.10%** |
+| GATv2 + Learned Edge | 66.50 ± 0.96% | 62.73 ± 0.71% |
+
+**Best model:** GATv2 + Static Edge
+
+---
+
+## PubMed
+
+| Model | Test Accuracy | Test Macro-F1 |
+|---|---:|---:|
+| GAT | 75.78 ± 0.64% | 75.79 ± 0.53% |
+| GATv2 | 75.58 ± 0.95% | 75.51 ± 0.82% |
+| GATv2 + Static Edge | **75.84 ± 1.21%** | **75.82 ± 0.80%** |
+| GATv2 + Learned Edge | 74.16 ± 2.39% | 74.41 ± 1.80% |
+
+**Best model:** GATv2 + Static Edge
+
+---
+
+# 9. Overall Results
+
+| Dataset | Best Model | Test Macro-F1 |
+|---|---|---:|
+| Cora | GAT | **76.61 ± 1.15%** |
+| CiteSeer | GATv2 + Static Edge | **64.05 ± 1.10%** |
+| PubMed | GATv2 + Static Edge | **75.82 ± 0.80%** |
+
+The results demonstrate that edge information provides **dataset-dependent benefits** rather than a universal improvement.
+
+---
+
+# 10. Comparison with GATv2
+
+The primary comparison is between vanilla GATv2 and its edge-enhanced variants.
+
+## Static Edge vs GATv2
+
+| Dataset | GATv2 | Static Edge | Difference |
+|---|---:|---:|---:|
+| Cora | 76.45% | 76.03% | -0.42 pp |
+| CiteSeer | 63.82% | 64.05% | **+0.23 pp** |
+| PubMed | 75.51% | 75.82% | **+0.31 pp** |
+
+Static edge representations improve GATv2 on CiteSeer and PubMed, while producing slightly lower performance on Cora.
+
+---
+
+## Learned Edge vs GATv2
+
+| Dataset | GATv2 | Learned Edge | Difference |
+|---|---:|---:|---:|
+| Cora | 76.45% | 76.42% | -0.03 pp |
+| CiteSeer | 63.82% | 62.73% | -1.09 pp |
+| PubMed | 75.51% | 74.41% | -1.10 pp |
+
+The learned-edge model does not consistently improve over GATv2.
+
+---
+
+# 11. Main Findings
+
+### Finding 1 — Edge information is dataset-dependent
+
+Static edge information improves GATv2 on CiteSeer and PubMed but does not improve performance on Cora.
+
+Therefore, edge information should not be considered universally beneficial.
+
+---
+
+### Finding 2 — Static edge representations are more reliable than learned edges
+
+The static-edge formulation performs better than the learned-edge formulation on CiteSeer and PubMed.
+
+The learned edge model also shows higher variability on PubMed.
+
+This suggests that additional trainable edge parameters may not be beneficial when the number of labeled nodes is extremely small.
+
+---
+
+### Finding 3 — GAT remains competitive
+
+On Cora, standard GAT achieves the highest five-seed Macro-F1:
 
 ```text
-Adaptive-Edge-Embedding-GAT/
+76.61 ± 1.15%
+```
+
+This demonstrates that the additional complexity of GATv2 and edge-enhanced variants does not automatically produce better results.
+
+---
+
+### Finding 4 — Small training sets make overfitting important
+
+The datasets provide only:
+
+```text
+Cora     : 140 training nodes
+CiteSeer : 120 training nodes
+PubMed   : 60 training nodes
+```
+
+During training, several models reach near-perfect training accuracy while validation performance remains substantially lower.
+
+This makes regularization, validation-based checkpointing, and multi-seed evaluation important.
+
+---
+
+# 12. Research Conclusion
+
+The experiments indicate that incorporating edge information into GATv2 provides **dataset-dependent rather than universally consistent improvements**.
+
+Static edge representations achieved the strongest performance among the GATv2 variants on CiteSeer and PubMed, while standard GAT remained the strongest model on Cora.
+
+The learned edge formulation did not consistently outperform GATv2 and showed comparatively larger variability, particularly on PubMed.
+
+Overall, the results suggest that **simple fixed edge representations can provide more reliable benefits than additional trainable edge parameters under limited-label settings**.
+
+---
+
+# 13. Project Structure
+
+```text
+DL_Final_Project/
 │
 ├── data/
 │   ├── Cora/
@@ -303,467 +436,47 @@ Adaptive-Edge-Embedding-GAT/
 │   └── tune.py
 │
 ├── results/
-│   ├── GAT_Research_Results.xlsx
 │   ├── all_results.csv
-│   └── all_results.json
+│   ├── all_results.json
+│   └── GAT_Research_Results.xlsx
 │
-├── requirements.txt
+├── venv/
+│
+├── .gitignore
 ├── README.md
-└── .gitignore
+└── requirements.txt
 ```
-
-The `results/` directory is generated after the experiment is executed.
 
 ---
 
-# 11. Main Files
+# 14. Installation
 
-## `src/main.py`
-
-Main entry point.
-
-It:
-
-- Loads Cora
-- Loads CiteSeer
-- Loads PubMed
-- Creates all five models
-- Trains the models
-- Evaluates validation performance
-- Restores the best validation checkpoint
-- Evaluates the test set
-- Generates result files
-
-Run the project using:
+## Clone the repository
 
 ```bash
-python -m src.main
+git clone <YOUR_REPOSITORY_URL>
+cd DL_Final_Project
 ```
 
----
-
-## `src/config.py`
-
-Contains experiment configuration such as:
-
-- Random seed
-- Dataset names
-- Device
-- Hidden dimensions
-- Number of attention heads
-- Dropout
-- Learning rate
-- Weight decay
-- Number of epochs
-- Early stopping patience
-
----
-
-## `src/data_loader.py`
-
-Responsible for:
-
-- Dataset loading
-- Feature normalization
-- Device placement
-- Dataset statistics
-
----
-
-## `src/models.py`
-
-Contains the five graph attention models:
-
-```text
-GAT
-GATv2
-GATv2 + Static Edge
-GATv2 + Learned Edge
-AE-GAT
-```
-
----
-
-## `src/edge_encoder.py`
-
-Implements edge representation methods:
-
-```text
-Static Edge Attributes
-Learned Edge Encoder
-Adaptive Edge Encoder
-```
-
----
-
-## `src/train.py`
-
-Responsible for:
-
-- Model training
-- Validation
-- Loss calculation
-- Optimization
-- Learning-rate scheduling
-- Gradient clipping
-- Early stopping
-- Best-model checkpointing
-- Test evaluation
-
----
-
-## `src/evaluate.py`
-
-Responsible for saving experiment results to:
-
-```text
-Excel
-CSV
-JSON
-```
-
----
-
-## `src/tune.py`
-
-Contains validation-based hyperparameter tuning utilities.
-
-The test set should not be used for hyperparameter selection.
-
----
-
-# 12. Run the Project
-
-From the project root:
+## Create a virtual environment
 
 ```bash
-python -m src.main
+python -m venv venv
 ```
 
-### Important
-
-Run the command from:
-
-```text
-Adaptive-Edge-Embedding-GAT/
-```
-
-Correct:
-
-```bash
-cd Adaptive-Edge-Embedding-GAT
-python -m src.main
-```
-
-Do not run:
-
-```bash
-cd src
-python -m src.main
-```
-
-because the project uses Python package-relative imports.
-
----
-
-# 13. Training and Testing
-
-Training and testing are handled by the main experiment runner.
-
-Use:
-
-```bash
-python -m src.main
-```
-
-The workflow is:
-
-```text
-Dataset
-   │
-   ▼
-Model initialization
-   │
-   ▼
-Training set
-   │
-   ▼
-Model training
-   │
-   ▼
-Validation evaluation
-   │
-   ▼
-Best validation checkpoint
-   │
-   ▼
-Restore best checkpoint
-   │
-   ▼
-Test evaluation
-   │
-   ▼
-Save results
-```
-
-The test set is evaluated after selecting the best validation checkpoint.
-
-This prevents the test set from being used as a training/tuning signal.
-
----
-
-# 14. Model Configuration
-
-The final baseline configuration uses a compact GAT architecture.
-
-Typical settings include:
-
-```text
-Hidden channels: 8
-Attention heads: 8
-Attention dropout: 0.6
-Classifier dropout: 0.6
-Learning rate: 0.005
-Weight decay: 0.0005
-Epochs: 200
-Early stopping patience: 40
-```
-
-These settings are intentionally kept close to a conventional GAT benchmark configuration rather than using a large custom network.
-
----
-
-# 15. Results
-
-After a successful run, the following files are generated:
-
-```text
-results/
-├── GAT_Research_Results.xlsx
-├── all_results.csv
-└── all_results.json
-```
-
----
-
-## Excel Results
-
-```text
-results/GAT_Research_Results.xlsx
-```
-
-The workbook contains:
-
-```text
-All Results
-Cora
-CiteSeer
-PubMed
-Model Average
-Dataset Average
-Best Per Dataset
-```
-
----
-
-## CSV Results
-
-```text
-results/all_results.csv
-```
-
-Contains the complete experiment results in tabular format.
-
----
-
-## JSON Results
-
-```text
-results/all_results.json
-```
-
-Contains the same experiment results in JSON format.
-
----
-
-# 16. Evaluation Metrics
-
-The project reports:
-
-### Accuracy
-
-Percentage of correctly classified nodes.
-
-### Macro Precision
-
-Average precision across all classes, giving each class equal importance.
-
-### Macro Recall
-
-Average recall across all classes.
-
-### Macro F1
-
-Average F1 score across classes.
-
-### Weighted F1
-
-F1 score weighted according to class support.
-
-### Trainable Parameters
-
-Number of parameters updated during training.
-
-### Training Time
-
-Time required to train each model.
-
-### Best Epoch
-
-Epoch at which the best validation checkpoint was obtained.
-
----
-
-# 17. Reproducibility
-
-The project uses:
-
-```text
-Seed = 42
-```
-
-The seed is applied to:
-
-- Python
-- NumPy
-- PyTorch
-- CUDA when available
-
-Run the same command:
-
-```bash
-python -m src.main
-```
-
-to reproduce the experiment.
-
-Small numerical differences may occur across:
-
-- Operating systems
-- PyTorch versions
-- PyTorch Geometric versions
-- CPU architectures
-- GPU architectures
-
----
-
-# 18. CPU Execution
-
-The project automatically detects the available hardware.
-
-For a CPU system:
-
-```text
-Device : cpu
-```
-
-No additional configuration is required.
-
-For example:
-
-```bash
-python -m src.main
-```
-
-will execute the complete experiment on CPU.
-
----
-
-# 19. GPU Execution
-
-If CUDA-enabled PyTorch is installed correctly:
-
-```python
-torch.cuda.is_available()
-```
-
-should return:
-
-```text
-True
-```
-
-The project then automatically uses:
-
-```text
-cuda
-```
-
-instead of:
-
-```text
-cpu
-```
-
----
-
-# 20. Expected Console Output
-
-A successful run starts approximately as:
-
-```text
-======================================================================
-ADAPTIVE EDGE-EMBEDDING GAT
-======================================================================
-Device  : cpu
-Seed    : 42
-Datasets: Cora, CiteSeer, PubMed
-Models  : 5
-Hidden  : 8
-Heads   : 8
-Dropout : 0.6
-======================================================================
-```
-
-The program then runs:
-
-```text
-Cora | GAT
-Cora | GATv2
-Cora | GATv2 + Static Edge
-Cora | GATv2 + Learned Edge
-Cora | AE-GAT
-
-CiteSeer | GAT
-CiteSeer | GATv2
-...
-
-PubMed | GAT
-PubMed | GATv2
-...
-```
-
-At the end:
-
-```text
-FINAL RESEARCH METRICS
-```
-
-followed by the complete model comparison.
-
----
-
-# 21. Troubleshooting
-
-## `ModuleNotFoundError`
-
-Activate the virtual environment:
+Activate it on Linux/macOS:
 
 ```bash
 source venv/bin/activate
 ```
 
-Then:
+Windows:
+
+```bash
+venv\Scripts\activate
+```
+
+## Install dependencies
 
 ```bash
 pip install -r requirements.txt
@@ -771,322 +484,113 @@ pip install -r requirements.txt
 
 ---
 
-## Check PyTorch
+# 15. Running the Experiment
 
-```bash
-python -c "import torch; print(torch.__version__)"
-```
-
----
-
-## Check PyTorch Geometric
-
-```bash
-python -c "import torch_geometric; print(torch_geometric.__version__)"
-```
-
----
-
-## Check CUDA
-
-```bash
-python -c "import torch; print(torch.cuda.is_available())"
-```
-
----
-
-## Dataset Download Failure
-
-If a dataset download is incomplete, remove the affected dataset directory and rerun:
-
-```bash
-python -m src.main
-```
-
-For example:
-
-```bash
-rm -rf data/Cora
-```
-
-Then:
-
-```bash
-python -m src.main
-```
-
----
-
-# 22. Clean Installation
-
-A new Linux/macOS machine can be configured using:
-
-```bash
-git clone https://github.com/RITWIK4959/Adaptive-Edge-Embedding-GAT.git
-
-cd Adaptive-Edge-Embedding-GAT
-
-python3 -m venv venv
-
-source venv/bin/activate
-
-python -m pip install --upgrade pip
-
-pip install torch --index-url https://download.pytorch.org/whl/cpu
-
-pip install -r requirements.txt
-
-python -m src.main
-```
-
-For an NVIDIA GPU, install the appropriate PyTorch CUDA build instead of the CPU wheel.
-
----
-
-# 23. Research Workflow
-
-```text
-                Citation Graph
-                       │
-                       ▼
-                Node Features
-                       │
-                       ▼
-              ┌────────────────┐
-              │ Graph Attention│
-              │    Models      │
-              └────────────────┘
-                       │
-       ┌───────────────┼───────────────┐
-       ▼               ▼               ▼
-      GAT            GATv2        Edge-aware
-                                       │
-                              ┌────────┼────────┐
-                              ▼        ▼        ▼
-                           Static   Learned   Adaptive
-                           Edge      Edge      Edge
-                              │        │        │
-                              └────────┼────────┘
-                                       ▼
-                                Node Classification
-                                       │
-                                       ▼
-                              Validation Evaluation
-                                       │
-                                       ▼
-                             Best Checkpoint
-                                       │
-                                       ▼
-                                Test Evaluation
-                                       │
-                                       ▼
-                             Research Results
-```
-
----
-
-# 24. Experimental Fairness
-
-For a fair model comparison:
-
-- Use the same dataset split.
-- Use the same random seed.
-- Use the same evaluation metrics.
-- Use the same training procedure.
-- Select checkpoints using validation performance.
-- Do not tune hyperparameters using the test set.
-- Report results for every model.
-- Report both accuracy and Macro F1.
-- Report model parameter counts.
-
-The test set should only be used for final evaluation.
-
----
-
-# 25. Research Models
-
-## GAT
-
-Standard Graph Attention Network baseline.
-
-```text
-Node Features
-      ↓
-Multi-head GAT
-      ↓
-GAT Output
-      ↓
-Classification
-```
-
-## GATv2
-
-Uses the GATv2 attention mechanism.
-
-```text
-Node Features
-      ↓
-GATv2
-      ↓
-Classification
-```
-
-## GATv2 + Static Edge
-
-Adds deterministic edge attributes to GATv2.
-
-```text
-Node Features ──┐
-                ├── GATv2
-Edge Features ──┘
-                ↓
-          Classification
-```
-
-## GATv2 + Learned Edge
-
-Learns edge representations from source and target node representations.
-
-```text
-Source Node ──┐
-              ├── Edge Encoder ── Edge Embedding
-Target Node ──┘
-                         │
-                         ▼
-                      GATv2
-                         │
-                         ▼
-                   Classification
-```
-
-## AE-GAT
-
-Uses an adaptive edge encoder with gated edge representations.
-
-```text
-Source Node ──┐
-Target Node ──┼── Adaptive Edge Encoder
-Difference ───┤
-Interaction ──┘
-                    │
-                    ▼
-              Adaptive Edge
-                 Embedding
-                    │
-                    ▼
-                  GATv2
-                    │
-                    ▼
-              Node Classification
-```
-
----
-
-# 26. Output Directory
-
-Generated experiment files are stored in:
-
-```text
-results/
-```
-
-Example:
-
-```text
-results/
-├── GAT_Research_Results.xlsx
-├── all_results.csv
-└── all_results.json
-```
-
-The results directory can be deleted before a fresh experiment:
+For the complete five-seed experiment:
 
 ```bash
 rm -rf results
-```
-
-Then rerun:
-
-```bash
 python -m src.main
 ```
 
----
-
-# 27. Quick Start
-
-If Python and Git are already installed:
-
-```bash
-git clone https://github.com/RITWIK4959/Adaptive-Edge-Embedding-GAT.git
-
-cd Adaptive-Edge-Embedding-GAT
-
-python3 -m venv venv
-
-source venv/bin/activate
-
-pip install --upgrade pip
-
-pip install torch --index-url https://download.pytorch.org/whl/cpu
-
-pip install -r requirements.txt
-
-python -m src.main
-```
-
-That's all that is required for the standard CPU setup.
-
-The datasets are downloaded automatically on first execution.
-
----
-
-# 28. Main Entry Point
-
-The main file is:
+The program executes:
 
 ```text
-src/main.py
-```
+Seed 42
+    Cora
+        GAT
+        GATv2
+        GATv2 + Static Edge
+        GATv2 + Learned Edge
 
-Run it from the project root:
+    CiteSeer
+        GAT
+        GATv2
+        GATv2 + Static Edge
+        GATv2 + Learned Edge
 
-```bash
-python -m src.main
+    PubMed
+        GAT
+        GATv2
+        GATv2 + Static Edge
+        GATv2 + Learned Edge
+
+Seed 43
+...
+Seed 44
+...
+Seed 45
+...
+Seed 46
+...
 ```
 
 ---
 
-# 29. License
+# 16. Output Files
 
-This repository is intended for academic and research use.
+After execution, the following files are generated:
 
-Please comply with the licenses and terms associated with PyTorch, PyTorch Geometric, and the benchmark datasets used by the project.
+```text
+results/all_results.csv
+results/all_results.json
+results/GAT_Research_Results.xlsx
+```
+
+These contain the results for all datasets, models, and seeds.
 
 ---
 
-# 30. Acknowledgements
+# 17. Reproducibility Checklist
 
-This project uses:
+Before producing final paper results, verify:
 
+- [x] Four models only
+- [x] Same datasets
+- [x] Same train/validation/test splits
+- [x] Same hidden dimension
+- [x] Same number of layers
+- [x] Same optimization settings
+- [x] Same checkpoint criterion
+- [x] Five random seeds
+- [x] Test evaluation after best validation checkpoint
+- [x] Mean and standard deviation reported
+- [x] No artificial result inflation
+- [x] Static and learned edge variants evaluated under the same protocol
+
+---
+
+# 18. Important Experimental Note
+
+The results in this README should be interpreted as the outcome of the current controlled five-seed configuration.
+
+Earlier development runs used different architectures and hyperparameters. Those results should **not** be directly combined with the final five-seed experiment.
+
+For the final paper, use the five-seed results from the controlled configuration as the primary results.
+
+---
+
+# 19. Technologies
+
+- Python
 - PyTorch
 - PyTorch Geometric
-- Cora
-- CiteSeer
-- PubMed
-
-The graph-learning implementation is built using PyTorch Geometric's GAT/GATv2 operators and dataset infrastructure.
+- NumPy
+- scikit-learn
+- Pandas
+- openpyxl
 
 ---
 
-## Repository
+# 20. Research Scope
 
-**GitHub:**
+### Included
 
-https://github.com/RITWIK4959/Adaptive-Edge-Embedding-GAT
-
-**Main execution command:**
-
-```bash
-python -m src.main
-```
+- Graph Neural Networks
+- Graph Attention Networks
+- GATv2
+- Static edge representations
+- Learned edge representations
+- Node classification
+- Multi-seed evaluation
+- Robustness through statistical reporting
